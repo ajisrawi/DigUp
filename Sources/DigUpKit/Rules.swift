@@ -144,6 +144,10 @@ public enum Rules {
         if skippedFolderNames.contains(name) { return "developer folder" }
         if name.hasSuffix(".noindex") { return ".noindex folder" }
         if url.path == home + "/Library" { return "~/Library" }
+        #if os(Windows)
+        // Windows' ~/Library: programs' settings and caches. It's hidden as a rule, but not on every PC.
+        if url.path.lowercased() == (home + "/AppData").lowercased() { return "AppData" }
+        #endif
         if excluded.contains(where: { url.path == $0 || url.path.hasPrefix($0 + "/") }) { return "excluded folder" }
         return nil
     }

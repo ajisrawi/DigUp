@@ -35,9 +35,11 @@ public enum Crawler {
         let rootPaths = Set(roots.map { $0.standardizedFileURL.path })
 
         for root in roots.map({ $0.standardizedFileURL }) {
+            // The home folder itself is never a code project: a package.json left there by an npm install would
+            // otherwise leave only its screenshots to search.
             if options.code {
                 repos.enterRoot(root.path)
-            } else if Rules.isProjectRoot(root.path) {
+            } else if root.path != home, Rules.isProjectRoot(root.path) {
                 projectRoots.insert(root.path)
             }
             // A skip applies inside the chosen folders that contain it: a folder chosen inside a skipped one is
@@ -54,9 +56,17 @@ public enum Crawler {
                                              errorHandler: { _, _ in true }) else { continue }
             #endif
             func visit(_ url: URL) {
+                #if os(Windows)
+                // The walk's URLs say whether they're folders, and nothing here needs more of them (`DirectoryWalk`):
+                // asking Foundation is where a walk of a whole user folder trapped.
+                let values: URLResourceValues? = nil
+                let isDirectory = url.hasDirectoryPath
+                #else
                 let values = try? url.resourceValues(forKeys: Set(keys))
+                let isDirectory = values?.isDirectory == true
+                #endif
                 let isPackage = FileSystem.isPackage(url, values)
-                if values?.isDirectory == true, !isPackage {
+                if isDirectory, !isPackage {
                     if let reason = Rules.skipReason(forFolder: url, home: home, excluded: skips)
                         ?? (options.code ? Rules.codeSkipReason(forFolder: url) : nil) {
                         walker.skipDescendants()

@@ -156,13 +156,15 @@ enum FileSystem {
 /// A depth-first walk with FileManager's enumerator's shape (`nextObject`, `skipDescendants`), where skipping leaves out
 /// exactly the folder just returned. Hidden files (the attribute, or a name starting with a dot, as on a Mac) are left
 /// out, and folders that can't be read are passed over.
+///
+/// Folders come back as directory URLs (`hasDirectoryPath`), read from the listing itself, so the crawl never asks
+/// Foundation for resource values: Swift 6.4's `URL.resourceValues` trapped (0xc000001d, in `FileManager`) an hour
+/// into a walk of a whole user folder (2026-10-13), which took the index helper down before its sync was saved.
 final class DirectoryWalk {
-    private let keys: [URLResourceKey]
     private var pending: [URL]   // what's next, last first
     private var opened: URL?     // the folder just returned: its contents come next, unless skipped
 
     init(_ root: URL, keys: [URLResourceKey]) {
-        self.keys = keys
         pending = []
         pending = contents(of: root).reversed()
     }
@@ -173,16 +175,40 @@ final class DirectoryWalk {
             opened = nil
         }
         guard let next = pending.popLast() else { return nil }
-        if (try? next.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { opened = next }
+        if next.hasDirectoryPath { opened = next }
         return next
     }
 
     func skipDescendants() { opened = nil }
 
+    /// A folder's entries, from FindFirstFileExW. Links (symbolic links, junctions) come back as files, never walked
+    /// into, as `FileSystem.info` sees them; cloud placeholders' folders (OneDrive) are folders. Names that aren't valid
+    /// UTF-16 are repaired, and the file then can't be found (`info` says so) rather than stopping the walk.
     private func contents(of folder: URL) -> [URL] {
-        let found = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys,
-                                                                  options: [.skipsHiddenFiles])) ?? []
-        return found.filter { !$0.lastPathComponent.hasPrefix(".") }
+        var native = folder.path.replacingOccurrences(of: "/", with: "\\")
+        if !native.hasSuffix("\\") { native += "\\" }
+        // Past MAX_PATH only the \\?\ form reaches it (deep node_modules-style trees).
+        let pattern = (native.count > 240 && !native.hasPrefix("\\\\") ? "\\\\?\\" : "") + native + "*"
+        var found = WIN32_FIND_DATAW()
+        let search = pattern.withCString(encodedAs: UTF16.self) {
+            FindFirstFileExW($0, FindExInfoBasic, &found, FindExSearchNameMatch, nil, DWORD(FIND_FIRST_EX_LARGE_FETCH))
+        }
+        guard let search, search != INVALID_HANDLE_VALUE else { return [] }
+        defer { FindClose(search) }
+        let symlink: DWORD = 0xA000_000C, junction: DWORD = 0xA000_0003   // IO_REPARSE_TAG_SYMLINK, _MOUNT_POINT
+        var entries: [URL] = []
+        repeat {
+            let name = withUnsafeBytes(of: found.cFileName) {
+                String(decodingCString: $0.bindMemory(to: UInt16.self).baseAddress!, as: UTF16.self)
+            }
+            let attributes = found.dwFileAttributes
+            if name.hasPrefix(".") || attributes & DWORD(FILE_ATTRIBUTE_HIDDEN) != 0 { continue }   // ".", ".." too
+            let link = attributes & DWORD(FILE_ATTRIBUTE_REPARSE_POINT) != 0
+                && (found.dwReserved0 == symlink || found.dwReserved0 == junction)
+            let isFolder = attributes & DWORD(FILE_ATTRIBUTE_DIRECTORY) != 0 && !link
+            entries.append(folder.appendingPathComponent(name, isDirectory: isFolder))
+        } while FindNextFileW(search, &found)
+        return entries
     }
 }
 #endif
