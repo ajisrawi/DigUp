@@ -14,7 +14,7 @@ macOS 14 or later · Free and open source<br>
 > and its search engine goes to the original author; this repo packages the Windows port (the `digup` helper and the
 > Tauri tray app in `shell/`) as an installer.
 >
-> **[Download for Windows](https://github.com/ajisrawi/DigUp-Windows/releases/latest)** · Windows 10 or 11, x64 ·
+> **[Download for Windows](https://github.com/ajisrawi/DigUp-Windows/releases)** · Windows 10 or 11, x64 ·
 > preview: see the release notes for known issues. To build it yourself, see "Build from source" below.
 
 <p align="center"><img src="docs/demo.gif" width="800" alt="DigUp's search panel finding a zebra in a video, a podcast moment, a clause in a lease, a dog on the beach in English, Bengali and Arabic, and code that opens in Zed"></p>
