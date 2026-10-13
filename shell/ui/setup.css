@@ -79,6 +79,9 @@ h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: 
 .folder .name { font-size: 13px; font-weight: 600; }
 .folder .path { font-size: 11px; color: var(--secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder .counts { font-size: 11px; color: var(--secondary); text-align: right; flex: none; max-width: 52%; }
+.folder.inside .counts { font-style: italic; }
+.option { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 22px; font-size: 13px; }
+.option input { width: 16px; height: 16px; accent-color: var(--moss); margin: 0; }
 
 button {
   font: inherit; font-size: 13px; color: var(--text); background: var(--card); border: 1px solid var(--line);

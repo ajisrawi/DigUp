@@ -12,7 +12,7 @@ const PAGES = ["welcome", "folders", "shortcut", "ready"];
 const $ = (id) => document.getElementById(id);
 const folders = new Map();   // path → {checked, row, counts}
 let page = 0;
-let info = { offered: [], chosen: [], hotkey: "", model: { state: "checking" }, auto: false };
+let info = { offered: [], chosen: [], hotkey: "", model: { state: "checking" }, auto: false, autostart: false };
 
 async function start() {
   info = await invoke("setup_info");
@@ -26,6 +26,9 @@ async function start() {
   showModel(info.model);
   tauri.event.listen("model", ({ payload }) => showModel(payload));
   showKeys(info.hotkey);
+  $("autostart").checked = info.autostart;
+  $("autostart-label").textContent = isWindows ? "Start DigUp with Windows"
+    : isMac ? "Open DigUp at login" : "Start DigUp at login";
   if (!firstTime) page = 1;   // Choose Folders…: straight to the folders
   const asked = PAGES.indexOf(new URLSearchParams(location.search).get("page"));   // dev snapshots: ?page=folders
   if (asked >= 0) page = asked;
@@ -40,6 +43,7 @@ function render() {
   $("back").hidden = page === 0;
   $("next").textContent = page === PAGES.length - 1 ? "Start" : "Continue";
   $("next").disabled = page === 1 && !chosenFolders().length;
+  for (const path of folders.keys()) showCounts(path);
 }
 
 $("next").addEventListener("click", async () => {
@@ -50,7 +54,7 @@ $("next").addEventListener("click", async () => {
   }
   $("next").disabled = true;
   try {
-    await invoke("finish_setup", { folders: chosenFolders() });
+    await invoke("finish_setup", { folders: chosenFolders(), autostart: $("autostart").checked });
   } catch (error) {
     $("model").textContent = String(error);
     $("next").disabled = false;
@@ -87,7 +91,7 @@ function addFolder(path, checked) {
   text.className = "text";
   const name = document.createElement("div");
   name.className = "name";
-  name.textContent = path.split(/[\\/]/).filter(Boolean).pop() || path;
+  name.textContent = displayName(path);
   const where = document.createElement("div");
   where.className = "path";
   where.textContent = isWindows ? path.replaceAll("/", "\\") : path;
@@ -97,7 +101,20 @@ function addFolder(path, checked) {
   counts.textContent = "Counting…";
   row.append(box, text, counts);
   $("folder-list").append(row);
-  folders.set(path, { checked, row, counts });
+  folders.set(path, { checked, row, counts, text: "Counting…" });
+}
+
+/// A folder's counts, or, when it's inside another chosen folder, that it's searched with that one (the shell walks
+/// only the outer folder, so the inner one isn't read twice).
+function showCounts(path) {
+  const folder = folders.get(path);
+  const outer = folder.checked && chosenFolders().find((other) => inside(path, other));
+  folder.row.classList.toggle("inside", Boolean(outer));
+  folder.counts.textContent = outer ? `Searched with ${displayName(outer)}` : folder.text;
+}
+
+function displayName(path) {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
 }
 
 function chosenFolders() {
@@ -110,19 +127,28 @@ async function estimate(paths) {
   try {
     answers = await invoke("estimate", { folders: paths });
   } catch (error) {
-    for (const path of paths) folders.get(path).counts.textContent = "";
-    return;
+    answers = [];
   }
   for (const path of paths) {
     const answer = answers.find((item) => same(item.folder, path));
-    folders.get(path).counts.textContent = answer ? countsText(answer) : "";
+    folders.get(path).text = answer ? countsText(answer) : "";
+    showCounts(path);
   }
 }
 
 /// The helper reports folders with forward slashes (and Windows paths compare without case).
+function pathKey(path) {
+  const plain = (path || "").replaceAll("\\", "/").replace(/\/$/, "");
+  return isWindows ? plain.toLowerCase() : plain;
+}
+
 function same(a, b) {
-  const plain = (path) => (path || "").replaceAll("\\", "/").replace(/\/$/, "");
-  return isWindows ? plain(a).toLowerCase() === plain(b).toLowerCase() : plain(a) === plain(b);
+  return pathKey(a) === pathKey(b);
+}
+
+/// `path` is below `outer` (not `outer` itself).
+function inside(path, outer) {
+  return pathKey(path).startsWith(pathKey(outer) + "/");
 }
 
 /// "1,204 pictures · 37 PDFs · 12 documents · 3 videos"

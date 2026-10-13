@@ -17,9 +17,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
@@ -41,6 +42,8 @@ struct Shell {
     watcher: Mutex<Option<FolderWatcher>>,
     /// The tray menu's first line: what's going on.
     status: Mutex<Option<MenuItem<Wry>>>,
+    /// The tray menu's Start with Windows, ticked as Windows has it.
+    autostart: Mutex<Option<CheckMenuItem<Wry>>>,
     /// When the search service last reloaded the index (while indexing, at most every few seconds).
     reloaded: Mutex<Instant>,
     /// Debug runs with setup: the panel's query waits until the first index is in.
@@ -55,6 +58,18 @@ impl Shell {
             return self.options.roots.iter().map(|root| root.display().to_string()).collect();
         }
         self.settings.lock().unwrap().folders.clone()
+    }
+
+    /// The folders the helpers and the watcher get: the chosen ones less those inside another (`outermost`).
+    fn searched(&self) -> Vec<String> {
+        outermost(&self.folders(), &self.settings.lock().unwrap().skipped)
+    }
+
+    /// Setup ticks Start with Windows for an installed DigUp, not for dev and debug runs (as the Mac app suggests its
+    /// login item only from /Applications): trying a build never adds it to what Windows starts.
+    fn suggests_autostart(&self) -> bool {
+        let options = &self.options;
+        !cfg!(debug_assertions) && options.roots.is_empty() && options.settings.is_none() && !options.debug_setup
     }
 
     fn is_set_up(&self) -> bool {
@@ -92,13 +107,43 @@ impl Shell {
         for extension in &settings.skip_types {
             args.extend(["--exclude-ext".to_string(), extension.clone()]);
         }
-        args.extend(self.folders());
+        args.extend(self.searched());
         self.launch(args, "index.log")
     }
 
     fn model_ready(&self) -> bool {
         self.model_state.lock().unwrap()["state"] == "ready"
     }
+}
+
+/// `folders` less those inside another of them: choosing the user folder and its Documents would walk Documents twice.
+/// One inside a skipped folder of the outer one stays, since that's how it's chosen back in (`FolderSelection`).
+fn outermost(folders: &[String], skipped: &[String]) -> Vec<String> {
+    folders
+        .iter()
+        .filter(|folder| {
+            !folders.iter().any(|outer| {
+                is_inside(folder, outer)
+                    && !skipped.iter().any(|skip| is_inside(skip, outer) && (same_path(skip, folder) || is_inside(folder, skip)))
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// Paths as compared here: forward slashes, no trailing one, and on Windows without case.
+fn path_key(path: &str) -> String {
+    let path = path.replace('\\', "/").trim_end_matches('/').to_string();
+    if cfg!(windows) { path.to_lowercase() } else { path }
+}
+
+/// `inner` is a folder below `outer` (not `outer` itself).
+fn is_inside(inner: &str, outer: &str) -> bool {
+    path_key(inner).starts_with(&(path_key(outer) + "/"))
+}
+
+fn same_path(a: &str, b: &str) -> bool {
+    path_key(a) == path_key(b)
 }
 
 // MARK: Commands
@@ -148,12 +193,15 @@ fn setup_info(app: AppHandle, shell: State<'_, Arc<Shell>>) -> Value {
                 .collect()
         }
     };
+    let starts = app.autolaunch().is_enabled().unwrap_or(false);
     json!({
         "offered": offered.iter().map(|folder| folder.display().to_string()).collect::<Vec<_>>(),
         "chosen": shell.folders(),
         "hotkey": shortcut_text(&shell.hotkey()),
         "model": shell.model_state.lock().unwrap().clone(),
         "auto": shell.options.debug_setup,
+        // Ticked on a first setup of an installed DigUp, and after that as it is.
+        "autostart": starts || (!shell.is_set_up() && shell.suggests_autostart()),
     })
 }
 
@@ -168,9 +216,14 @@ async fn pick_folders(app: AppHandle) -> Vec<String> {
     picked.into_iter().filter_map(|folder| folder.into_path().ok()).map(|path| path.display().to_string()).collect()
 }
 
-/// Setup's last step: the folders are saved and indexing starts (once the model is in).
+/// Setup's last step: the folders are saved, Start with Windows is set as ticked, and indexing starts (once the model
+/// is in).
 #[tauri::command]
-fn finish_setup(app: AppHandle, shell: State<'_, Arc<Shell>>, folders: Vec<String>) -> Result<(), String> {
+fn finish_setup(app: AppHandle, shell: State<'_, Arc<Shell>>, folders: Vec<String>, autostart: Option<bool>)
+    -> Result<(), String> {
+    if let Some(on) = autostart {
+        set_autostart(&app, on);
+    }
     {
         let mut settings = shell.settings.lock().unwrap();
         settings.folders = folders;
@@ -243,6 +296,8 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _, _| show_panel(app)))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Start with Windows: the user's Run key (a login item on a Mac, an XDG autostart entry on Linux).
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _, event| {
@@ -280,7 +335,7 @@ fn setup(app: &mut tauri::App, options: Options) -> Result<(), Box<dyn std::erro
     };
     let settings = Settings::load(&settings_path);
     let roots: Vec<String> = if options.roots.is_empty() {
-        settings.folders.clone()
+        outermost(&settings.folders, &settings.skipped)
     } else {
         options.roots.iter().map(|root| root.display().to_string()).collect()
     };
@@ -325,6 +380,7 @@ fn setup(app: &mut tauri::App, options: Options) -> Result<(), Box<dyn std::erro
         model_state: Mutex::new(json!({"state": "checking"})),
         watcher: Mutex::new(None),
         status: Mutex::new(None),
+        autostart: Mutex::new(None),
         reloaded: Mutex::new(Instant::now()),
         debug_query_sent: AtomicBool::new(false),
         logs,
@@ -369,7 +425,7 @@ fn setup(app: &mut tauri::App, options: Options) -> Result<(), Box<dyn std::erro
 /// After setup or a change of folders: the search service, the watcher and indexing follow the new folders.
 fn apply_folders(app: &AppHandle) {
     let shell = app.state::<Arc<Shell>>().inner().clone();
-    let folders = shell.folders();
+    let folders = shell.searched();
     let (skipped, types) = {
         let settings = shell.settings.lock().unwrap();
         (settings.skipped.clone(), settings.skip_types.clone())
@@ -387,7 +443,7 @@ fn apply_folders(app: &AppHandle) {
 /// Watches the folders, and indexes them now when the model is in.
 fn watch_folders(app: &AppHandle) {
     let shell = app.state::<Arc<Shell>>().inner().clone();
-    let folders: Vec<PathBuf> = shell.folders().iter().map(PathBuf::from).collect();
+    let folders: Vec<PathBuf> = shell.searched().iter().map(PathBuf::from).collect();
     if folders.is_empty() {
         set_status(app, "No folders chosen yet");
         return;
@@ -544,11 +600,14 @@ fn make_tray(app: &AppHandle, shell: &Arc<Shell>) -> tauri::Result<()> {
     let search = MenuItem::with_id(app, "search", "Search…", true, Some(shell.hotkey().as_str()))?;
     let folders = MenuItem::with_id(app, "folders", "Choose Folders…", true, None::<&str>)?;
     let index = MenuItem::with_id(app, "index", "Index Now", true, None::<&str>)?;
+    let starts = app.autolaunch().is_enabled().unwrap_or(false);
+    let autostart = CheckMenuItem::with_id(app, "autostart", autostart_label(), true, starts, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit DigUp", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(
         app,
-        &[&status, &separator, &search, &folders, &index, &PredefinedMenuItem::separator(app)?, &quit_item],
+        &[&status, &separator, &search, &folders, &index, &PredefinedMenuItem::separator(app)?, &autostart,
+          &PredefinedMenuItem::separator(app)?, &quit_item],
     )?;
     // A Mac's menu bar takes a template (it colors it); trays elsewhere show the app's own small icon.
     #[cfg(target_os = "macos")]
@@ -567,6 +626,10 @@ fn make_tray(app: &AppHandle, shell: &Arc<Shell>) -> tauri::Result<()> {
                 let _ = show_setup(app);
             }
             "index" => index_now(app),
+            "autostart" => {
+                let on = !app.autolaunch().is_enabled().unwrap_or(false);
+                set_autostart(app, on);
+            }
             "quit" => quit(app),
             _ => {}
         })
@@ -580,7 +643,32 @@ fn make_tray(app: &AppHandle, shell: &Arc<Shell>) -> tauri::Result<()> {
         })
         .build(app)?;
     *shell.status.lock().unwrap() = Some(status);
+    *shell.autostart.lock().unwrap() = Some(autostart);
     Ok(())
+}
+
+/// "Start with Windows", or what the same thing is called elsewhere.
+fn autostart_label() -> &'static str {
+    if cfg!(windows) {
+        "Start with Windows"
+    } else if cfg!(target_os = "macos") {
+        "Open at Login"
+    } else {
+        "Start at Login"
+    }
+}
+
+/// Turns Start with Windows on or off, and ticks the tray's item as it then is (a policy can refuse the change).
+fn set_autostart(app: &AppHandle, on: bool) {
+    let autolaunch = app.autolaunch();
+    let result = if on { autolaunch.enable() } else { autolaunch.disable() };
+    if let Err(error) = result {
+        eprintln!("digup-shell: can't turn {} {}: {error}", autostart_label(), if on { "on" } else { "off" });
+    }
+    let starts = autolaunch.is_enabled().unwrap_or(false);
+    if let Some(item) = app.state::<Arc<Shell>>().autostart.lock().unwrap().as_ref() {
+        let _ = item.set_checked(starts);
+    }
 }
 
 fn set_status(app: &AppHandle, text: &str) {
