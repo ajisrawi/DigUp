@@ -1,0 +1,22 @@
+{
+  "mainBinaryName": "DigUp",
+  "bundle": {
+    "targets": ["nsis"],
+    "publisher": "Abdur Rahim",
+    "shortDescription": "Search the files on your PC by what's in them",
+    "copyright": "MIT License",
+    "resources": {
+      "../../build.windows/helper/": "helper/"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    }
+  }
+}

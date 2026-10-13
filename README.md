@@ -136,6 +136,17 @@ swift build -c release && swift test
 ./build.sh                        # → build.noindex/DigUp.app
 ```
 
+On Windows, the app is the Tauri shell in `shell/` over the same `digup` helper. With Visual Studio 2022 (C++
+workload), Git for Windows, Python 3, the Swift toolchain (6.4+), Rust and Node.js installed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
+# → shell\src-tauri\target\release\bundle\nsis\DigUp_<version>_x64-setup.exe
+```
+
+It builds llama.cpp with MSVC (CPU backends; CUDA or Vulkan when their SDKs are found), the helper, stages it with
+its DLLs in `build.windows\helper`, and packages a per-user installer.
+
 There's also a command-line tool, `.build/release/digup`, that indexes, searches and runs the evals from the terminal
 (`digup --help`). `scripts/make-testbed.sh` builds a folder of test files to try it on (it needs ffmpeg), and `evals/`
 holds the queries ranking changes are measured with.

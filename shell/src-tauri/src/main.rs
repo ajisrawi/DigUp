@@ -394,20 +394,34 @@ fn watch_folders(app: &AppHandle) {
     }
     let changed = {
         let app = app.clone();
-        move || run_index(&app)
+        move || {
+            run_index(&app);
+        }
     };
     *shell.watcher.lock().unwrap() = Some(FolderWatcher::start(&folders, shell.options.index_folder(), changed));
-    run_index(app);
+    index_now(app);
 }
 
-/// Has the index helper sync and index, once there's a model and a folder.
-fn run_index(app: &AppHandle) {
+/// Has the index helper sync and index, once there's a model and a folder. False when it didn't start.
+fn run_index(app: &AppHandle) -> bool {
     let shell = app.state::<Arc<Shell>>();
     if !shell.is_set_up() || shell.folders().is_empty() || !shell.model_ready() {
-        return;
+        return false;
     }
     if let Err(error) = shell.index.run(&shell.index_launch()) {
         set_status(app, &format!("Indexing couldn't start: {error}"));
+        return false;
+    }
+    true
+}
+
+/// Index Now, or new folders: the walk through the folders comes before the first file and says nothing until it's
+/// done (minutes, for a big folder on a cold disk), so the status says so at once.
+fn index_now(app: &AppHandle) {
+    if run_index(app) {
+        set_status(app, "Looking through your folders…");
+    } else if !app.state::<Arc<Shell>>().model_ready() {
+        set_status(app, "Waiting for the model");
     }
 }
 
@@ -552,7 +566,7 @@ fn make_tray(app: &AppHandle, shell: &Arc<Shell>) -> tauri::Result<()> {
             "folders" => {
                 let _ = show_setup(app);
             }
-            "index" => run_index(app),
+            "index" => index_now(app),
             "quit" => quit(app),
             _ => {}
         })
