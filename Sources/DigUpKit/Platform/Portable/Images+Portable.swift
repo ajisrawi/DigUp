@@ -7,6 +7,9 @@ import Foundation
 extension ImageExtractor {
     /// No SVG here yet: stb and ffmpeg don't draw vector pictures.
     static let drawsVectorPictures = false
+    /// ffmpeg is there, beside the helper or on PATH: files that failed without it can be read now
+    /// (`IndexStore.readAgainOnce`).
+    static var hasFFmpeg: Bool { FFmpeg.ffmpeg != nil }
 
     /// Writes a downscaled copy for the model: decoded in full, turned the way the camera held it, scaled so the long
     /// side is `maxPixel`. stb reads JPEG, PNG, BMP, GIF, PSD, TGA and PNM here; HEIC, WebP, TIFF and AVIF go through

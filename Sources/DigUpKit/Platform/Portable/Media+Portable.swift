@@ -19,6 +19,14 @@ enum FFmpeg {
         return FileSystem.executable(name)
     }
 
+    /// Both tools are there, or the file fails saying so: without ffprobe a recording measured 0 s and was skipped as
+    /// silent, as if there were nothing in it (`IndexStore.readAgainOnce` reads those again once ffmpeg comes).
+    static func requireTools() throws {
+        guard ffmpeg != nil, ffprobe != nil else {
+            throw ExtractError.unreadable("ffmpeg isn't installed (audio and video need it)")
+        }
+    }
+
     /// Runs a tool and hands its standard output to `read` as it comes (a long decode never sits in memory whole).
     /// Throws when the tool is missing or fails.
     static func run(_ tool: String?, _ arguments: [String], read: (Data) throws -> Void) throws {
@@ -81,6 +89,7 @@ extension AudioExtractor {
     /// ≤ 30 s. Streams: memory stays at one window, even for a 3-hour podcast.
     static func windows(of url: URL, window: Double, hop: Double, minimum: Double = 2, to folder: URL) async throws
         -> (pieces: [MediaPiece], duration: Double) {
+        try FFmpeg.requireTools()
         guard MediaInfo.streams(of: url).audio else { return ([], 0) }
         let duration = MediaInfo.duration(of: url) ?? 0
         let windowSamples = Int(window * sampleRate), hopSamples = Int(hop * sampleRate)
@@ -127,6 +136,7 @@ extension VideoExtractor {
     /// previous kept one (8×8 average hash within 4 bits) only extends it.
     static func keyframes(of url: URL, every interval: Double, maxPixel: Int, maxFrames: Int = 1200, to folder: URL)
         async throws -> (frames: [MediaPiece], duration: Double, hasAudio: Bool) {
+        try FFmpeg.requireTools()
         let streams = MediaInfo.streams(of: url)
         let duration = MediaInfo.duration(of: url) ?? 0
         guard duration > 0, streams.video else { return ([], duration, streams.audio) }

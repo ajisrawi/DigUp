@@ -13,6 +13,8 @@ extension ImageExtractor {
     /// gets decoded at full resolution. HEIC, RAW, WebP and friends all work.
     /// Pictures ImageIO can't open (SVG) are drawn with AppKit (`drawn`).
     static let drawsVectorPictures = true
+    /// AVFoundation and ImageIO read media here: nothing ever waited for ffmpeg (`IndexStore.readAgainOnce`).
+    static let hasFFmpeg = false
 
     static func prepare(_ url: URL, maxPixel: Int, minSide: Int, to folder: URL, png: Bool) throws -> Prepared {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
