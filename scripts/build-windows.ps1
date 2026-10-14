@@ -35,7 +35,8 @@ if ($LASTEXITCODE) { throw 'swift build failed' }
 $bin = (swift build -c release --show-bin-path).Trim()
 
 # 3. build.windows\helper: digup.exe and every DLL it loads that isn't Windows' own (Swift's runtime, the C++ runtime,
-#    llama.cpp, PDFium), found by walking its imports. ggml's backends load at run time, so they're copied whole.
+#    llama.cpp, PDFium), found by walking its imports. ggml's backends load at run time, so they're copied whole. Then
+#    ffmpeg, which the helper runs.
 $stage = "$root\build.windows\helper"
 Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $stage | Out-Null
@@ -58,6 +59,33 @@ while ($queue.Count) {
         if ($found) { Copy-Item $found $stage; $queue.Enqueue("$stage\$dll") }
     }
 }
+# ffmpeg and ffprobe beside the helper, where it looks first: Windows has no AVFoundation, so audio, video and HEIC,
+# WebP, TIFF and AVIF pictures go through them, and they must be 8.1 or later (Images+Portable.swift). An LGPL build
+# (BtbN/FFmpeg-Builds) at a pinned date, its zip checked; ffplay isn't needed. Its license and where its source is go
+# with it.
+$ffmpegTag = 'autobuild-2026-10-13-13-05'
+$ffmpegName = 'ffmpeg-n8.1.3-18-g46d899d7a0-win64-lgpl-shared-8.1'
+$ffmpegSha = '19d92dfb1481e72e4e8f94844bf609418297a646f33deb6864c409ca752469c4'
+$ffmpegZip = "$root\Vendor\ffmpeg-download\$ffmpegName.zip"
+if (-not (Test-Path $ffmpegZip) -or (Get-FileHash $ffmpegZip -Algorithm SHA256).Hash -ne $ffmpegSha) {
+    New-Item -ItemType Directory -Force (Split-Path $ffmpegZip) | Out-Null
+    $ProgressPreference = 'SilentlyContinue'
+    Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/$ffmpegTag/$ffmpegName.zip" -OutFile $ffmpegZip -UseBasicParsing
+    if ((Get-FileHash $ffmpegZip -Algorithm SHA256).Hash -ne $ffmpegSha) { throw "ffmpeg's zip isn't the pinned one" }
+}
+$ffmpegDir = "$root\Vendor\ffmpeg"
+Remove-Item -Recurse -Force $ffmpegDir -ErrorAction SilentlyContinue
+Expand-Archive $ffmpegZip -DestinationPath $ffmpegDir
+Get-ChildItem "$ffmpegDir\$ffmpegName\bin" | Where-Object Name -ne 'ffplay.exe' | Copy-Item -Destination $stage
+Copy-Item "$ffmpegDir\$ffmpegName\LICENSE.txt" "$stage\ffmpeg-LICENSE.txt"
+Set-Content "$stage\ffmpeg-SOURCE.txt" -Encoding ascii -Value @"
+ffmpeg.exe, ffprobe.exe and the av*, sw* DLLs beside them are FFmpeg (https://ffmpeg.org), licensed under the
+LGPL 2.1 or later (ffmpeg-LICENSE.txt). They are the unmodified build $ffmpegName from
+https://github.com/BtbN/FFmpeg-Builds/releases/tag/$ffmpegTag, whose source and build scripts are there and at
+https://github.com/BtbN/FFmpeg-Builds. You can replace them with any other FFmpeg 8.1 or later build.
+"@
+& "$stage\ffmpeg.exe" -hide_banner -version | Select-Object -First 1
+if ($LASTEXITCODE) { throw 'The staged ffmpeg does not run' }
 "Staged {0} files, {1:N0} MB, in build.windows\helper" -f (Get-ChildItem $stage).Count, ((Get-ChildItem $stage | Measure-Object Length -Sum).Sum / 1MB)
 & "$stage\digup.exe" --help | Select-Object -First 1
 if ($LASTEXITCODE) { throw 'The staged helper does not run' }

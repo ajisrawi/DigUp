@@ -7,7 +7,7 @@ Search the files on your PC by what's in them, with Google DeepMind's
 <a href="https://huggingface.co/google/embeddinggemma-2">EmbeddingGemma 2</a>. Private, offline, free.</p>
 
 <p align="center">
-  <a href="https://github.com/ajisrawi/DigUp-Windows/releases/download/v0.1.0/DigUp_0.1.0_x64-setup.exe"><img src="https://img.shields.io/badge/Download_for_Windows-x64_installer_·_24_MB-356652?style=for-the-badge" alt="Download for Windows" height="44"></a>
+  <a href="https://github.com/ajisrawi/DigUp-Windows/releases/download/v0.1.0/DigUp_0.1.0_x64-setup.exe"><img src="https://img.shields.io/badge/Download_for_Windows-x64_installer_·_73_MB-356652?style=for-the-badge" alt="Download for Windows" height="44"></a>
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@ All versions and release notes are on the [Releases page](https://github.com/aji
 
 - **Pictures and screenshots** by what they show: "a dog on the beach", "the payment error"
 - **PDFs and documents** page by page: "the clause about pets in the lease", "flight receipt"
-- **Moments in audio and video**: "where they talk about sleep" jumps to that minute (needs ffmpeg, see below)
+- **Moments in audio and video**: "where they talk about sleep" jumps to that minute
 - **Across languages**: a search in English finds a note in Arabic, Bengali or any of the model's 100+ languages
 - **Exact words** too: invoice numbers, error codes and names are matched as written
 
@@ -71,9 +71,6 @@ This is a preview release. Known limits:
 
 - **CPU only** for now, so the first pass over a big folder takes a while. After that, new files are searchable
   seconds after they land.
-- **Audio, video, and HEIC, WebP, TIFF and AVIF pictures need [ffmpeg](https://ffmpeg.org)** on your PATH. Install
-  it with `winget install Gyan.FFmpeg`, then index again. PDFs, documents and JPEG, PNG, GIF and BMP pictures work out
-  of the box.
 - **Inside a code project** (a folder with `.git`, `package.json` and the like), only screenshots are indexed.
 - **The installer isn't code-signed yet**, hence the SmartScreen warning.
 - **To uninstall**, use Settings → Apps. The model and index stay in `%LOCALAPPDATA%\DigUp`; delete that folder to
@@ -82,7 +79,7 @@ This is a preview release. Known limits:
 ## How it works
 
 ```
-your folders ─► readers (PDFium for PDFs, stb for pictures, ffmpeg for audio and video)
+your folders ─► readers (PDFium for PDFs, stb for pictures, ffmpeg for audio, video and HEIC; all included)
              ─► EmbeddingGemma 2 on llama.cpp, in a helper process
              ─► one SQLite file: a vector for every picture, page, passage, video frame and 30 s of sound,
                 plus a keyword index
@@ -103,7 +100,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
 ```
 
 It builds llama.cpp with MSVC (CPU backends; CUDA or Vulkan when their SDKs are found) and the `digup` helper, stages
-the helper with its DLLs, and packages a per-user installer. The helper is also a command-line tool:
+the helper with its DLLs and a pinned LGPL build of ffmpeg 8.1, and packages a per-user installer. The helper is also a command-line tool:
 `digup estimate`, `digup index`, `digup search` (`digup --help`).
 
 ## Credits
@@ -113,8 +110,9 @@ the original author; this repository brings it to Windows. For the Mac app and i
 [ARahim3/DigUp](https://github.com/ARahim3/DigUp).
 
 Built on [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) by Google DeepMind (Apache 2.0),
-[llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT), [PDFium](https://pdfium.googlesource.com/pdfium/) and
-[Tauri](https://tauri.app). DigUp isn't affiliated with Google or Microsoft. Gemma is a trademark of Google LLC;
+[llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT), [PDFium](https://pdfium.googlesource.com/pdfium/),
+[FFmpeg](https://ffmpeg.org) (LGPL, an unmodified build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds))
+and [Tauri](https://tauri.app). DigUp isn't affiliated with Google or Microsoft. Gemma is a trademark of Google LLC;
 Windows is a trademark of Microsoft Corporation.
 
 ## License
